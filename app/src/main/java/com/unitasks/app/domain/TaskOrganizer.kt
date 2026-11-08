@@ -65,7 +65,7 @@ object TaskOrganizer {
      * unified view (Overdue, Today, Tomorrow, Next 7 days, Later, No date).
      */
     fun dateSections(tasks: List<Task>, today: LocalDate, compact: Boolean): List<TaskSection> {
-        val byDate = compareBy<Task>({ it.dueDate }, { it.dueTime }, { it.position })
+        val byDate = compareBy<Task>({ it.dueDate }, { it.position }, { it.dueTime })
         val (dated, undated) = tasks.partition { it.dueDate != null }
         val sections = mutableListOf<TaskSection>()
         val past = dated.filter { it.dueDate!!.isBefore(today) }.sortedWith(byDate)

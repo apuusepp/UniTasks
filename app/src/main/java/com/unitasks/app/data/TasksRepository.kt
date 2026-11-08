@@ -398,7 +398,11 @@ class TasksRepository(
      */
     suspend fun reorder(orderedIds: List<String>, movedId: String) {
         val rows = orderedIds.mapNotNull { taskDao.getById(it) }
-        if (rows.isEmpty()) return
+        val movedRow = rows.firstOrNull { it.id == movedId } ?: return
+        if (rows.size != orderedIds.distinct().size || rows.any {
+                it.listId != movedRow.listId || it.parentId != movedRow.parentId || it.completed || it.pendingDelete
+            }) return
+        if (rows.map { it.id }.toSet() != activeSiblings(movedRow.listId, movedRow.parentId).map { it.id }.toSet()) return
         val base = rows.minOf { it.position }
         db.withTransaction {
             rows.forEachIndexed { index, e ->
@@ -410,6 +414,33 @@ class TasksRepository(
             }
         }
         syncRequester.requestSync()
+    }
+
+    /** Changes only the date, preserving each task's own time and repeat rule. */
+    suspend fun changeDueDates(taskIds: Set<String>, date: LocalDate?) {
+        val changed = db.withTransaction {
+            taskIds.mapNotNull { taskDao.getById(it) }.filter { !it.completed && !it.pendingDelete }.map { task ->
+                task.copy(
+                    dueDate = date?.toEpochDay(),
+                    dueTimeMinutes = if (date == null) null else task.dueTimeMinutes,
+                    recurrence = if (date == null) null else task.recurrence,
+                    isDirty = true, updatedAt = clock(),
+                ).also { taskDao.update(it) }
+            }
+        }
+        changed.forEach { reminders.schedule(it.toDomain()) }
+        if (changed.isNotEmpty()) syncRequester.requestSync()
+    }
+
+    /** Full sibling order includes hidden/search-filtered tasks, preventing rank collisions. */
+    suspend fun moveRelative(taskId: String, anchorId: String, before: Boolean) {
+        val task = taskDao.getById(taskId)?.takeUnless { it.completed || it.pendingDelete } ?: return
+        val siblings = activeSiblings(task.listId, task.parentId).sortedBy { it.position }.map { it.id }.toMutableList()
+        if (taskId == anchorId || anchorId !in siblings) return
+        siblings.remove(taskId)
+        val index = siblings.indexOf(anchorId) + if (before) 0 else 1
+        siblings.add(index, taskId)
+        reorder(siblings, taskId)
     }
 
     suspend fun rescheduleAllReminders() {

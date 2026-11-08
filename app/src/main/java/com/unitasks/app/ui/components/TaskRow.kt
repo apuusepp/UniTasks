@@ -1,10 +1,10 @@
 package com.unitasks.app.ui.components
 
-import android.content.Intent
-import android.net.Uri
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -26,6 +26,7 @@ import androidx.compose.material.icons.outlined.Repeat
 import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -33,7 +34,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
@@ -47,7 +47,7 @@ import java.time.LocalDate
  * circle completion button, title, optional details preview, due date/time + repeat chip,
  * optional link chip, optional list badge (for the unified / starred views), and star toggle.
  */
-@OptIn(ExperimentalLayoutApi::class)
+@OptIn(ExperimentalLayoutApi::class, ExperimentalFoundationApi::class)
 @Composable
 fun TaskRow(
     task: Task,
@@ -60,14 +60,16 @@ fun TaskRow(
     modifier: Modifier = Modifier,
     indented: Boolean = false,
     trailingDragHandle: (@Composable () -> Unit)? = null,
+    selectionMode: Boolean = false,
+    selected: Boolean = false,
+    onSelect: () -> Unit = {},
 ) {
-    val context = LocalContext.current
     Row(
         modifier = modifier
             .testTag("task:${task.id}")
             .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.surface)
-            .clickable(onClick = onClick)
+            .background(if (selected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surface)
+            .combinedClickable(onClick = if (selectionMode) onSelect else onClick, onLongClick = onSelect)
             .padding(
                 start = if (indented) 44.dp else 8.dp,
                 end = 4.dp,
@@ -76,7 +78,9 @@ fun TaskRow(
             ),
         verticalAlignment = Alignment.Top,
     ) {
-        IconButton(
+        if (selectionMode) {
+            Checkbox(checked = selected, onCheckedChange = { onSelect() }, modifier = Modifier.testTag("select:${task.id}"))
+        } else IconButton(
             onClick = onToggleComplete,
             modifier = Modifier.size(40.dp).testTag("complete:${task.id}"),
         ) {
@@ -113,7 +117,8 @@ fun TaskRow(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            val hasChips = (!task.completed && task.dueDate != null) || !task.linkUrl.isNullOrBlank() || listBadge != null
+            TaskLinksRow(task, enabled = !selectionMode)
+            val hasChips = (!task.completed && task.dueDate != null) || listBadge != null
             if (hasChips) {
                 FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -125,30 +130,8 @@ fun TaskRow(
                             time = task.dueTime,
                             repeating = task.recurrence != null,
                             today = today,
-                            onClick = onDateClick,
+                            onClick = if (selectionMode) onSelect else onDateClick,
                         )
-                    }
-                    if (!task.linkUrl.isNullOrBlank()) {
-                        Surface(
-                            shape = MaterialTheme.shapes.small,
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                            modifier = Modifier.clickable {
-                                runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(task.linkUrl))) }
-                            },
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Icon(Icons.Outlined.Link, contentDescription = null, modifier = Modifier.size(14.dp))
-                                Spacer(Modifier.width(4.dp))
-                                Text(
-                                    text = task.linkTitle?.ifBlank { null } ?: "Link",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    maxLines = 1,
-                                )
-                            }
-                        }
                     }
                     if (listBadge != null) {
                         ListBadge(listId = task.listId, title = listBadge)
@@ -156,7 +139,7 @@ fun TaskRow(
                 }
             }
         }
-        if (!task.completed) {
+        if (!task.completed && !selectionMode) {
             IconButton(
                 onClick = onToggleStar,
                 modifier = Modifier.size(40.dp).testTag("star:${task.id}"),

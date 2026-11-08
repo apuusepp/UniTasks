@@ -7,6 +7,7 @@ import com.unitasks.app.domain.UnifiedGrouping
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import org.json.JSONArray
 
 enum class AuthMode { NONE, LOCAL, GOOGLE }
 
@@ -42,6 +43,18 @@ class Settings(context: Context, name: String = "unitasks_settings") {
             .getOrDefault(SortMode.MY_ORDER),
     )
     val allTasksSort: StateFlow<SortMode> = _allTasksSort.asStateFlow()
+
+    private val _manualTaskOrder = MutableStateFlow(runCatching {
+        val array = JSONArray(prefs.getString(KEY_TASK_ORDER, "[]"))
+        List(array.length()) { array.getString(it) }
+    }.getOrDefault(emptyList()))
+    val manualTaskOrder: StateFlow<List<String>> = _manualTaskOrder.asStateFlow()
+
+    fun setManualTaskOrder(ids: List<String>) {
+        val order = ids.distinct()
+        prefs.edit().putString(KEY_TASK_ORDER, JSONArray(order).toString()).apply()
+        _manualTaskOrder.value = order
+    }
 
     private val _lastSyncAt = MutableStateFlow(prefs.getLong(KEY_LAST_SYNC_AT, 0L).takeIf { it > 0 })
     val lastSyncAt: StateFlow<Long?> = _lastSyncAt.asStateFlow()
@@ -98,6 +111,7 @@ class Settings(context: Context, name: String = "unitasks_settings") {
         _hiddenLists.value = emptySet()
         _starredSort.value = SortMode.STARRED_RECENTLY
         _allTasksSort.value = SortMode.MY_ORDER
+        _manualTaskOrder.value = emptyList()
         _lastSyncAt.value = null
     }
 
@@ -108,6 +122,7 @@ class Settings(context: Context, name: String = "unitasks_settings") {
         const val KEY_HIDDEN = "hidden_lists"
         const val KEY_STARRED_SORT = "starred_sort"
         const val KEY_ALL_TASKS_SORT = "all_tasks_sort"
+        const val KEY_TASK_ORDER = "manual_task_order"
         const val KEY_DEFAULT_LIST = "default_list"
         const val KEY_LIST_SYNC = "list_sync_"
         const val KEY_LAST_SYNC_AT = "last_sync_at"

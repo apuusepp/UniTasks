@@ -9,6 +9,10 @@ Native Android (Kotlin + Jetpack Compose + Material 3 + Room) task manager with 
   - **Group by date**: chronological buckets (*Overdue*, *Today*, *Tomorrow*, *Next 7 days*, *Later*, *No date*) across all lists, with a colored list badge on every task row.
   - **Compact view controls**: one toolbar for grouping, sorting, and list filtering; choose visible lists in a scrollable sheet with a selection count and a quick **Show all lists** reset.
   - **Global search** across all lists.
+  - **Active counts** on All tasks, Starred, and each list tab (including active subtasks; completed tasks are excluded).
+  - **Drag handles** to reorder tasks, including across lists in flat All tasks and Starred views, while keeping their original list and subtask parent. Manual dragging switches title/star sorting to My order. Cross-list display order is stored on the device; ordering within a list also syncs with Google Tasks. Dragging in a date view changes the due date; empty date targets appear during the drag, with the exact destination date shown for range headers.
+  - **Bulk due dates**: long-press a task or tap Select tasks, select tasks (or select all visible), then choose Today, Tomorrow, a calendar date, or Remove date. Existing times and repeat rules are preserved when setting a date; removing the date also removes its time and repeat rule.
+  - **Clickable links** from task titles, notes, and synced source links appear directly on task rows and in details.
 - **Google Tasks feature parity**:
   - Multiple task lists (create, rename, delete; default list protected from deletion).
   - **Starred** tab aggregating starred tasks across all lists.

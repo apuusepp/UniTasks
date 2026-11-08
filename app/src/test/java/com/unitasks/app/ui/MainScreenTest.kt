@@ -18,6 +18,9 @@ import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeLeft
 import androidx.compose.ui.test.swipeRight
 import androidx.test.core.app.ApplicationProvider
+import androidx.room.Room
+import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.cancel
 import com.unitasks.app.data.AuthMode
 import com.unitasks.app.data.Settings
 import com.unitasks.app.data.TasksRepository
@@ -46,18 +49,20 @@ class MainScreenTest {
     private lateinit var db: AppDatabase
     private lateinit var settings: Settings
     private lateinit var repo: TasksRepository
+    private lateinit var vm: MainViewModel
     private val today = LocalDate.of(2026, 11, 7)
 
     @Before
     fun setUp() {
         val context = ApplicationProvider.getApplicationContext<Context>()
-        db = AppDatabase.inMemory(context)
+        db = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java).allowMainThreadQueries().build()
         settings = Settings(context, "ui_prefs_${System.nanoTime()}").also { it.setAuth(AuthMode.LOCAL) }
         repo = TasksRepository(db, settings)
     }
 
     @After
     fun tearDown() {
+        if (::vm.isInitialized) vm.viewModelScope.cancel()
         db.close()
     }
 
@@ -72,7 +77,7 @@ class MainScreenTest {
             taskAId = repo.addTask(personalId, "Buy coffee", dueDate = today.minusDays(1), starred = true)
             repo.addTask(workId, "Send invoice", dueDate = today)
         }
-        val vm = MainViewModel(repo, settings, syncEngine = null, todayProvider = { today })
+        vm = MainViewModel(repo, settings, syncEngine = null, todayProvider = { today })
 
         composeRule.setContent {
             UniTasksTheme(dynamicColor = false) {

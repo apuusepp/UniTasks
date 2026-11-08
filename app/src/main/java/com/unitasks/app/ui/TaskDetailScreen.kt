@@ -62,6 +62,7 @@ import com.unitasks.app.domain.Task
 import com.unitasks.app.domain.TaskList
 import com.unitasks.app.ui.components.DateTimeRepeatDialog
 import com.unitasks.app.ui.components.formatDueChip
+import com.unitasks.app.ui.components.TaskLinksRow
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -220,6 +221,8 @@ fun TaskDetailScreen(
                     modifier = Modifier.fillMaxWidth().testTag("detail_notes"),
                 )
             }
+
+            TaskLinksRow(current.copy(title = title, notes = notes))
 
             // Date / time & repeat
             Row(

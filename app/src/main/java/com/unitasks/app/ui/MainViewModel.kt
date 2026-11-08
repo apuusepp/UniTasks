@@ -17,6 +17,7 @@ import com.unitasks.app.domain.TaskList
 import com.unitasks.app.domain.TaskOrganizer
 import com.unitasks.app.domain.TaskSection
 import com.unitasks.app.domain.UnifiedGrouping
+import com.unitasks.app.domain.TaskDrop
 import com.unitasks.app.domain.UnifiedViewBuilder
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
@@ -59,6 +60,7 @@ data class MainUiState(
     val isSyncing: Boolean = false,
     val syncError: String? = null,
     val needsReauth: Boolean = false,
+    val manualTaskOrder: List<String> = emptyList(),
 ) {
     val currentList: TaskList?
         get() = (selectedTab as? SelectedTab.ListTab)?.let { tab -> lists.firstOrNull { it.id == tab.listId } }
@@ -83,6 +85,7 @@ data class MainUiState(
             starredSort = starredSort,
             searchQuery = searchQuery,
             today = today,
+            manualOrder = manualTaskOrder,
         )
     }
 }
@@ -97,6 +100,7 @@ internal fun computeTabContent(
     starredSort: SortMode,
     searchQuery: String,
     today: LocalDate,
+    manualOrder: List<String> = emptyList(),
 ): Pair<List<TaskSection>, List<Task>> = when (tab) {
     SelectedTab.AllTasks -> {
         val agg = UnifiedViewBuilder.buildAllTasks(
@@ -107,6 +111,7 @@ internal fun computeTabContent(
             hiddenListIds = hiddenListIds,
             query = searchQuery,
             today = today,
+            manualOrder = manualOrder,
         )
         agg.sections to agg.completed
     }
@@ -117,6 +122,7 @@ internal fun computeTabContent(
             sort = starredSort,
             query = searchQuery,
             today = today,
+            manualOrder = manualOrder,
         )
         agg.sections to agg.completed
     }
@@ -213,6 +219,7 @@ class MainViewModel(
             starredSort = starredSort,
             searchQuery = searchQuery,
             today = today,
+            manualOrder = settings.manualTaskOrder.value,
         )
         return MainUiState(
             lists = lists,
@@ -233,6 +240,7 @@ class MainViewModel(
             isSyncing = isSyncing,
             syncError = syncError,
             needsReauth = needsReauth,
+            manualTaskOrder = settings.manualTaskOrder.value,
         )
     }
 
@@ -366,6 +374,45 @@ class MainViewModel(
     fun reorder(orderedIds: List<String>, movedId: String) {
         viewModelScope.launch {
             repository.reorder(orderedIds, movedId)
+            refresh()
+        }
+    }
+
+    fun changeDueDates(ids: Set<String>, date: LocalDate?) {
+        viewModelScope.launch {
+            repository.changeDueDates(ids, date)
+            refresh()
+        }
+    }
+
+    fun dropTask(drop: TaskDrop) {
+        val tab = state.value.selectedTab
+        viewModelScope.launch {
+            drop.dateTarget?.let { repository.changeDueDates(setOf(drop.taskId), it.date) }
+            val task = repository.getTask(drop.taskId)
+            val anchor = drop.anchorId?.let { repository.getTask(it) }
+            if (task != null && anchor != null && task.parentId == anchor.parentId) {
+                if (task.listId == anchor.listId) repository.moveRelative(task.id, anchor.id, drop.before)
+                if ((tab !is SelectedTab.ListTab && task.listId != anchor.listId) || settings.manualTaskOrder.value.isNotEmpty()) {
+                    val listRanks = state.value.lists.withIndex().associate { it.value.id to it.index }
+                    val ranks = settings.manualTaskOrder.value.withIndex().associate { it.value to it.index }
+                    val order = repository.getTasks().filter { !it.completed }.sortedWith(
+                        compareBy<Task> { ranks[it.id] ?: Int.MIN_VALUE }
+                            .thenBy { listRanks[it.listId] ?: Int.MAX_VALUE }.thenBy { it.position },
+                    ).map { it.id }.toMutableList()
+                    order.remove(task.id)
+                    val index = order.indexOf(anchor.id)
+                    if (index >= 0) {
+                        order.add(index + if (drop.before) 0 else 1, task.id)
+                        settings.setManualTaskOrder(order)
+                    }
+                }
+                when (tab) {
+                    SelectedTab.AllTasks -> settings.setAllTasksSort(SortMode.MY_ORDER)
+                    SelectedTab.Starred -> if (!drop.keepDateGrouping) settings.setStarredSort(SortMode.MY_ORDER)
+                    is SelectedTab.ListTab -> if (!drop.keepDateGrouping) repository.setListSort(tab.listId, SortMode.MY_ORDER)
+                }
+            }
             refresh()
         }
     }

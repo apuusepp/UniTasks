@@ -141,6 +141,8 @@ fun UniTasksRoot(container: AppContainer, initialTaskId: String? = null) {
                     container.syncRequester.cancelAll()
                     vm.signOut()
                 },
+                onChangeDueDates = vm::changeDueDates,
+                onDropTask = vm::dropTask,
             )
         }
         composable(

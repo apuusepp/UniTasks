@@ -115,4 +115,49 @@ class TasksRepositoryTest {
         assertEquals(listB, repo.getTask(sub)?.listId)
         assertEquals(movedParentId, repo.getTask(sub)?.parentId)
     }
+
+    @Test fun bulk_dates_preserve_individual_times_and_repeat_rules_and_skip_completed_tasks() = runBlocking {
+        val list = repo.ensureDefaultList()
+        val originalDate = LocalDate.of(2026, 11, 7)
+        val rule = RecurrenceRule(RecurrenceRule.Frequency.WEEKLY)
+        val a = repo.addTask(list, "A", notes = "Keep notes", dueDate = originalDate, dueTime = java.time.LocalTime.of(9, 30), recurrence = rule)
+        val b = repo.addTask(list, "B", dueDate = originalDate, dueTime = java.time.LocalTime.of(16, 0))
+        val done = repo.addTask(list, "Done", dueDate = originalDate)
+        repo.setCompleted(done, true)
+        val requestsBefore = syncRequests
+        repo.changeDueDates(setOf(a, b, done), originalDate.plusDays(3))
+        assertEquals(originalDate.plusDays(3), repo.getTask(a)!!.dueDate)
+        assertEquals(java.time.LocalTime.of(9, 30), repo.getTask(a)!!.dueTime)
+        assertEquals(java.time.LocalTime.of(16, 0), repo.getTask(b)!!.dueTime)
+        assertEquals(rule, repo.getTask(a)!!.recurrence)
+        assertEquals("Keep notes", repo.getTask(a)!!.notes)
+        assertEquals(originalDate, repo.getTask(done)!!.dueDate)
+        assertEquals(requestsBefore + 1, syncRequests)
+        repo.changeDueDates(setOf(a, b), null)
+        assertNull(repo.getTask(a)!!.dueDate)
+        assertNull(repo.getTask(a)!!.dueTime)
+        assertNull(repo.getTask(a)!!.recurrence)
+    }
+
+    @Test fun drag_reorders_full_sibling_order_without_changing_list_or_subtask_parent() = runBlocking {
+        val list = repo.ensureDefaultList()
+        val a = repo.addTask(list, "A")
+        val hidden = repo.addTask(list, "Hidden by search")
+        val b = repo.addTask(list, "B")
+        val child = repo.addTask(list, "Child", parentId = a)
+        repo.moveRelative(a, b, before = true)
+        val order = repo.getTasks().filter { it.parentId == null }.sortedBy { it.position }.map { it.id }
+        assertEquals(listOf(a, b, hidden), order)
+        assertEquals(a, repo.getTask(child)!!.parentId)
+        assertTrue(db.taskDao().getById(a)!!.needsMove)
+        repo.moveRelative(child, b, before = false)
+        assertEquals(a, repo.getTask(child)!!.parentId)
+        val otherList = repo.createList("Other")
+        val outside = repo.addTask(otherList, "Outside")
+        repo.moveRelative(a, outside, before = true)
+        assertEquals(list, repo.getTask(a)!!.listId)
+        // Partial orders must not overwrite ranks belonging to hidden siblings.
+        repo.reorder(listOf(b, a), b)
+        assertEquals(order, repo.getTasks().filter { it.listId == list && it.parentId == null }.sortedBy { it.position }.map { it.id })
+    }
 }

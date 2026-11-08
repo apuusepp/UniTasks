@@ -1,11 +1,9 @@
 package com.unitasks.app.ui
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -14,8 +12,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
@@ -25,13 +21,14 @@ import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.ExpandLess
-import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.SwapVert
+import androidx.compose.material.icons.filled.Event
+import androidx.compose.material.icons.filled.SelectAll
+import androidx.compose.material.icons.outlined.Checklist
 import androidx.compose.material.icons.outlined.CheckCircleOutline
 import androidx.compose.material.icons.outlined.Layers
 import androidx.compose.material3.AlertDialog
@@ -61,14 +58,14 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.activity.compose.BackHandler
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -78,12 +75,11 @@ import com.unitasks.app.domain.RecurrenceRule
 import com.unitasks.app.domain.SortMode
 import com.unitasks.app.domain.Task
 import com.unitasks.app.domain.TaskList
-import com.unitasks.app.domain.TaskSection
 import com.unitasks.app.domain.UnifiedGrouping
+import com.unitasks.app.domain.TaskDrop
+import com.unitasks.app.ui.components.BulkDateDialog
 import com.unitasks.app.ui.components.AddTaskSheet
 import com.unitasks.app.ui.components.DateTimeRepeatDialog
-import com.unitasks.app.ui.components.TaskRow
-import com.unitasks.app.ui.theme.listAccentColor
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
 import java.time.Instant
@@ -124,6 +120,8 @@ fun MainScreen(
     onSyncNow: () -> Unit,
     onConnectGoogle: () -> Unit,
     onSignOut: () -> Unit,
+    onChangeDueDates: (Set<String>, LocalDate?) -> Unit = { _, _ -> },
+    onDropTask: (TaskDrop) -> Unit = {},
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
     var addSheetTargetListId by remember { mutableStateOf<String?>(null) }
@@ -134,8 +132,19 @@ fun MainScreen(
     var showMoreSheet by remember { mutableStateOf(false) }
     var showAccountDialog by remember { mutableStateOf(false) }
     var editingDateForTask by remember { mutableStateOf<Task?>(null) }
-    var completedExpanded by remember { mutableStateOf(false) }
-    val collapsedSections = remember { mutableStateMapOf<String, Boolean>() }
+    var selectionMode by rememberSaveable { mutableStateOf(false) }
+    var selectedIds by rememberSaveable { mutableStateOf(emptyList<String>()) }
+    var bulkDateDialog by rememberSaveable { mutableStateOf(false) }
+    fun toggleSelection(id: String) {
+        selectionMode = true
+        selectedIds = if (id in selectedIds) selectedIds - id else selectedIds + id
+    }
+    BackHandler(selectionMode && !bulkDateDialog) { selectionMode = false; selectedIds = emptyList() }
+    LaunchedEffect(state.selectedTab) { selectionMode = false; selectedIds = emptyList() }
+    LaunchedEffect(state.tasks) {
+        val activeIds = state.tasks.filter { !it.completed }.map { it.id }.toSet()
+        selectedIds = selectedIds.filter { it in activeIds }
+    }
 
     LaunchedEffect(undoEvents) {
         undoEvents.collect { action ->
@@ -150,11 +159,29 @@ fun MainScreen(
 
     Scaffold(
         topBar = {
-            MainTopBar(
+            if (selectionMode) TopAppBar(
+                title = { Text("${selectedIds.size} selected") },
+                navigationIcon = {
+                    IconButton(onClick = { selectionMode = false; selectedIds = emptyList() }) {
+                        Icon(Icons.Default.Close, contentDescription = "Exit selection")
+                    }
+                },
+                actions = {
+                    IconButton(onClick = {
+                        selectedIds = state.sections.flatMap { section -> section.nodes.flatMap { listOf(it.task.id) + it.children.map { child -> child.id } } }.distinct()
+                    }, modifier = Modifier.testTag("select_all_tasks")) {
+                        Icon(Icons.Default.SelectAll, contentDescription = "Select all visible tasks")
+                    }
+                    IconButton(onClick = { bulkDateDialog = true }, enabled = selectedIds.isNotEmpty(), modifier = Modifier.testTag("bulk_change_date")) {
+                        Icon(Icons.Default.Event, contentDescription = "Change selected tasks due date")
+                    }
+                },
+            ) else MainTopBar(
                 state = state,
                 onSearchChange = onSearchChange,
                 onSyncNow = onSyncNow,
                 onAccountClick = { showAccountDialog = true },
+                onStartSelection = { selectionMode = true },
             )
         },
         bottomBar = {
@@ -206,6 +233,8 @@ fun MainScreen(
         Column(modifier = Modifier.fillMaxSize().padding(padding)) {
             TasksTabBar(
                 lists = state.lists,
+                tasks = state.tasks,
+                hiddenListIds = state.hiddenListIds,
                 selected = state.selectedTab,
                 onSelect = onSelectTab,
                 onNewList = { showCreateListDialog = true },
@@ -257,104 +286,26 @@ fun MainScreen(
                     } else if (allEmpty && (pageTab != SelectedTab.AllTasks || state.unifiedGrouping != UnifiedGrouping.BY_LIST)) {
                         EmptyTasksPlaceholder(selectedTab = pageTab, isSearching = state.searchQuery.isNotBlank())
                     } else {
-                        LazyColumn(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .then(if (pageTab == state.selectedTab) Modifier.testTag("tasks_list") else Modifier),
-                            contentPadding = PaddingValues(bottom = 88.dp),
-                        ) {
-                            pageSections.forEach { section ->
-                                val isCollapsed = collapsedSections[section.key] == true
-                                if (section.title != null) {
-                                    item(key = "header:${section.key}") {
-                                        SectionHeader(
-                                            section = section,
-                                            collapsed = isCollapsed,
-                                            onToggleCollapse = { collapsedSections[section.key] = !isCollapsed },
-                                            onAddInList = section.listId?.let { lid -> { addSheetTargetListId = lid } },
-                                            onSelectList = section.listId?.let { lid -> { onSelectTab(SelectedTab.ListTab(lid)) } },
-                                        )
-                                    }
-                                }
-                                if (!isCollapsed) {
-                                    if (section.nodes.isEmpty() && section.listId != null) {
-                                        item(key = "empty:${section.key}") {
-                                            Text(
-                                                text = if (section.completedCount > 0) "All tasks completed (${section.completedCount})" else "No active tasks",
-                                                style = MaterialTheme.typography.bodyMedium,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
-                                            )
-                                        }
-                                    }
-                                    items(items = section.nodes, key = { "${section.key}:${it.task.id}" }) { node ->
-                                        Column {
-                                            TaskRow(
-                                                task = node.task,
-                                                listBadge = if (showBadgeOnRows) state.listTitles[node.task.listId] else null,
-                                                today = today,
-                                                onToggleComplete = { onToggleComplete(node.task) },
-                                                onToggleStar = { onToggleStar(node.task.id) },
-                                                onClick = { onOpenTask(node.task.id) },
-                                                onDateClick = { editingDateForTask = node.task },
-                                            )
-                                            node.children.forEach { child ->
-                                                TaskRow(
-                                                    task = child,
-                                                    listBadge = if (showBadgeOnRows) state.listTitles[child.listId] else null,
-                                                    today = today,
-                                                    onToggleComplete = { onToggleComplete(child) },
-                                                    onToggleStar = { onToggleStar(child.id) },
-                                                    onClick = { onOpenTask(child.id) },
-                                                    onDateClick = { editingDateForTask = child },
-                                                    indented = true,
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
-                            if (pageCompleted.isNotEmpty()) {
-                                item(key = "completed_header") {
-                                    Column {
-                                        HorizontalDivider(modifier = Modifier.padding(top = 8.dp))
-                                        Row(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .clickable { completedExpanded = !completedExpanded }
-                                                .padding(horizontal = 16.dp, vertical = 14.dp)
-                                                .testTag("completed_header"),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                        ) {
-                                            Text(
-                                                text = "Completed (${pageCompleted.size})",
-                                                style = MaterialTheme.typography.titleSmall,
-                                                modifier = Modifier.weight(1f),
-                                            )
-                                            Icon(
-                                                imageVector = if (completedExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                                                contentDescription = null,
-                                            )
-                                        }
-                                    }
-                                }
-                                if (completedExpanded) {
-                                    val showCompletedBadge = pageTab !is SelectedTab.ListTab
-                                    items(items = pageCompleted, key = { "done:${it.id}" }) { done ->
-                                        TaskRow(
-                                            task = done,
-                                            listBadge = if (showCompletedBadge) state.listTitles[done.listId] else null,
-                                            today = today,
-                                            onToggleComplete = { onToggleComplete(done) },
-                                            onToggleStar = { onToggleStar(done.id) },
-                                            onClick = { onOpenTask(done.id) },
-                                            onDateClick = {},
-                                        )
-                                    }
-                                }
-                            }
+                        val sort = when (pageTab) {
+                            SelectedTab.AllTasks -> state.allTasksSort
+                            SelectedTab.Starred -> state.starredSort
+                            is SelectedTab.ListTab -> state.lists.firstOrNull { it.id == pageTab.listId }?.sortMode
                         }
+                        TaskBoard(
+                            sections = pageSections, completed = pageCompleted, today = today,
+                            dateGrouped = (pageTab == SelectedTab.AllTasks && state.unifiedGrouping == UnifiedGrouping.BY_DATE) ||
+                                (pageTab != SelectedTab.AllTasks && sort == SortMode.DATE),
+                            compactDates = pageTab == SelectedTab.AllTasks,
+                            crossListOrdering = pageTab == SelectedTab.Starred ||
+                                (pageTab == SelectedTab.AllTasks && state.unifiedGrouping != UnifiedGrouping.BY_LIST),
+                            listTitles = state.listTitles, showBadges = showBadgeOnRows,
+                            selectionMode = selectionMode, selectedIds = selectedIds.toSet(), onSelect = ::toggleSelection,
+                            onOpenTask = onOpenTask, onToggleComplete = onToggleComplete, onToggleStar = onToggleStar,
+                            onDateClick = { editingDateForTask = it }, onDrop = onDropTask,
+                            onAddInList = { addSheetTargetListId = it },
+                            onSelectList = { onSelectTab(SelectedTab.ListTab(it)) },
+                            modifier = Modifier.fillMaxSize().then(if (pageTab == state.selectedTab) Modifier.testTag("tasks_list") else Modifier),
+                        )
                     }
                 }
             }
@@ -362,6 +313,15 @@ fun MainScreen(
     }
 
     // ---------------------------------------------------------------- sheets & dialogs
+
+    if (bulkDateDialog) {
+        BulkDateDialog(selectedIds.size, onDismiss = { bulkDateDialog = false }, today = today, onApply = { date ->
+            onChangeDueDates(selectedIds.toSet(), date)
+            bulkDateDialog = false
+            selectionMode = false
+            selectedIds = emptyList()
+        })
+    }
 
     addSheetTargetListId?.let { targetListId ->
         AddTaskSheet(
@@ -443,7 +403,7 @@ fun MainScreen(
             is SelectedTab.ListTab -> state.currentList?.sortMode ?: SortMode.MY_ORDER
         }
         val options = if (state.selectedTab == SelectedTab.Starred) {
-            listOf(SortMode.STARRED_RECENTLY to "Starred recently", SortMode.DATE to "Date", SortMode.TITLE to "Title")
+            listOf(SortMode.MY_ORDER to "My order", SortMode.STARRED_RECENTLY to "Starred recently", SortMode.DATE to "Date", SortMode.TITLE to "Title")
         } else {
             listOf(
                 SortMode.MY_ORDER to "My order",
@@ -548,6 +508,7 @@ private fun MainTopBar(
     onSearchChange: (Boolean, String) -> Unit,
     onSyncNow: () -> Unit,
     onAccountClick: () -> Unit,
+    onStartSelection: () -> Unit,
 ) {
     if (state.isSearching) {
         TopAppBar(
@@ -583,6 +544,9 @@ private fun MainTopBar(
         TopAppBar(
             title = { Text("Tasks", fontWeight = FontWeight.Medium) },
             actions = {
+                IconButton(onClick = onStartSelection, modifier = Modifier.testTag("btn_select_tasks")) {
+                    Icon(Icons.Outlined.Checklist, contentDescription = "Select tasks")
+                }
                 IconButton(onClick = { onSearchChange(true, "") }, modifier = Modifier.testTag("btn_search")) {
                     Icon(Icons.Default.Search, contentDescription = "Search")
                 }
@@ -607,6 +571,8 @@ private fun MainTopBar(
 @Composable
 private fun TasksTabBar(
     lists: List<TaskList>,
+    tasks: List<Task>,
+    hiddenListIds: Set<String>,
     selected: SelectedTab,
     onSelect: (SelectedTab) -> Unit,
     onNewList: () -> Unit,
@@ -620,7 +586,12 @@ private fun TasksTabBar(
         Tab(
             selected = selected == SelectedTab.Starred,
             onClick = { onSelect(SelectedTab.Starred) },
-            icon = { Icon(Icons.Filled.Star, contentDescription = "Starred") },
+            icon = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Filled.Star, contentDescription = "Starred")
+                    TaskCount(tasks.count { !it.completed && it.starred }, "count_starred")
+                }
+            },
             modifier = Modifier.testTag("tab_starred"),
         )
         Tab(
@@ -631,6 +602,7 @@ private fun TasksTabBar(
                     Icon(Icons.Outlined.Layers, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(6.dp))
                     Text("All tasks")
+                    TaskCount(tasks.count { !it.completed && it.listId !in hiddenListIds }, "count_all_tasks")
                 }
             },
             modifier = Modifier.testTag("tab_all_tasks"),
@@ -640,7 +612,12 @@ private fun TasksTabBar(
             Tab(
                 selected = isSelected,
                 onClick = { onSelect(SelectedTab.ListTab(list.id)) },
-                text = { Text(list.title) },
+                text = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(list.title)
+                        TaskCount(tasks.count { !it.completed && it.listId == list.id }, "count_list:${list.id}")
+                    }
+                },
                 modifier = Modifier.testTag("tab_list:${list.id}"),
             )
         }
@@ -660,54 +637,11 @@ private fun TasksTabBar(
 }
 
 @Composable
-private fun SectionHeader(
-    section: TaskSection,
-    collapsed: Boolean,
-    onToggleCollapse: () -> Unit,
-    onAddInList: (() -> Unit)?,
-    onSelectList: (() -> Unit)?,
-) {
-    val activeCount = section.nodes.sumOf { 1 + it.children.size }
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onToggleCollapse)
-            .padding(start = 16.dp, end = 8.dp, top = 14.dp, bottom = 6.dp)
-            .testTag("section:${section.key}"),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        if (section.listId != null) {
-            val accent = listAccentColor(section.listId)
-            Box(modifier = Modifier.size(10.dp).clip(CircleShape).background(accent))
-            Spacer(Modifier.width(10.dp))
-        }
-        Text(
-            text = section.title.orEmpty(),
-            style = MaterialTheme.typography.titleSmall,
-            fontWeight = FontWeight.SemiBold,
-            color = if (section.overdue) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
-            modifier = if (onSelectList != null) Modifier.clickable(onClick = onSelectList) else Modifier,
-        )
-        Spacer(Modifier.width(8.dp))
-        Text(
-            text = activeCount.toString(),
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Spacer(Modifier.weight(1f))
-        if (onAddInList != null) {
-            IconButton(
-                onClick = onAddInList,
-                modifier = Modifier.size(32.dp).testTag("add_in_list:${section.listId}"),
-            ) {
-                Icon(Icons.Default.Add, contentDescription = "Add task to ${section.title}", modifier = Modifier.size(18.dp))
-            }
-        }
-        Icon(
-            imageVector = if (collapsed) Icons.Default.ExpandMore else Icons.Default.ExpandLess,
-            contentDescription = if (collapsed) "Expand" else "Collapse",
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+private fun TaskCount(count: Int, tag: String) {
+    Surface(color = MaterialTheme.colorScheme.surfaceContainerHighest, shape = CircleShape,
+        modifier = Modifier.padding(start = 6.dp)) {
+        Text(count.toString(), style = MaterialTheme.typography.labelSmall,
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp).testTag(tag))
     }
 }
 

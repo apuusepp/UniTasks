@@ -42,7 +42,10 @@ object UnifiedViewBuilder {
         hiddenListIds: Set<String>,
         query: String,
         today: LocalDate,
+        manualOrder: List<String> = emptyList(),
     ): AggregateContent {
+        val ranks = manualOrder.withIndex().associate { it.value to it.index }
+        val manualComparator = compareBy<Task> { ranks[it.id] ?: Int.MIN_VALUE }.thenBy { it.position }
         val visibleLists = lists.filter { it.id !in hiddenListIds }
         val visibleIds = visibleLists.mapTo(HashSet()) { it.id }
         val listOrder = visibleLists.mapIndexed { idx, l -> l.id to idx }.toMap()
@@ -55,7 +58,10 @@ object UnifiedViewBuilder {
                 visibleLists.mapNotNull { list ->
                     val listTasks = byList[list.id].orEmpty()
                     val active = listTasks.filter { !it.completed }
-                    val nodes = sortNodesForGroup(active, sort, query)
+                    val nodes = sortNodesForGroup(active, sort, query).let { nodes ->
+                        if (sort == SortMode.MY_ORDER && ranks.isNotEmpty()) nodes.sortedWith(compareBy { ranks[it.task.id] ?: Int.MIN_VALUE })
+                            .map { it.copy(children = it.children.sortedWith(manualComparator)) } else nodes
+                    }
                     // While searching, drop lists without hits to keep results focused.
                     if (query.isNotBlank() && nodes.isEmpty()) return@mapNotNull null
                     TaskSection(
@@ -77,7 +83,8 @@ object UnifiedViewBuilder {
                                 .thenByDescending { it.task.starredAt ?: 0L }
                                 .thenBy { it.task.dueDate ?: LocalDate.MAX },
                         )
-                        SortMode.MY_ORDER, SortMode.DATE -> section.nodes
+                        SortMode.MY_ORDER -> section.nodes.sortedWith(compareBy<TaskNode> { ranks[it.task.id] ?: Int.MIN_VALUE }.thenBy { it.task.position })
+                        SortMode.DATE -> section.nodes
                     }
                     section.copy(nodes = sortedNodes)
                 }
@@ -89,7 +96,7 @@ object UnifiedViewBuilder {
                         val orderedByList = active.sortedWith(
                             compareBy<Task>({ listOrder[it.listId] ?: Int.MAX_VALUE }, { it.position }, { it.title.lowercase() }),
                         )
-                        TaskOrganizer.filterNodes( buildTreePreservingListOrder(orderedByList, listOrder), query)
+                        TaskOrganizer.filterNodes(buildTreePreservingListOrder(orderedByList, listOrder, ranks), query)
                     }
                     SortMode.DATE -> active.filter { TaskOrganizer.matches(it, query) }
                         .sortedWith(byDueDateThenOrder)
@@ -115,8 +122,8 @@ object UnifiedViewBuilder {
         SortMode.TITLE -> active.filter { TaskOrganizer.matches(it, query) }.sortedWith(byTitle).map { TaskNode(it) }
     }
 
-    private fun buildTreePreservingListOrder(tasks: List<Task>, listOrder: Map<String, Int>): List<TaskNode> {
-        val cmp = compareBy<Task>({ listOrder[it.listId] ?: Int.MAX_VALUE }, { it.position }, { it.title.lowercase() })
+    private fun buildTreePreservingListOrder(tasks: List<Task>, listOrder: Map<String, Int>, ranks: Map<String, Int>): List<TaskNode> {
+        val cmp = compareBy<Task>({ ranks[it.id] ?: Int.MIN_VALUE }, { listOrder[it.listId] ?: Int.MAX_VALUE }, { it.position }, { it.title.lowercase() })
         val ids = tasks.mapTo(HashSet()) { it.id }
         val childrenByParent = tasks.filter { it.parentId != null && it.parentId in ids }.groupBy { it.parentId!! }
         return tasks
@@ -132,12 +139,19 @@ object UnifiedViewBuilder {
         sort: SortMode,
         query: String,
         today: LocalDate,
+        manualOrder: List<String> = emptyList(),
     ): AggregateContent {
+        val ranks = manualOrder.withIndex().associate { it.value to it.index }
         val titles = lists.associate { it.id to it.title }
         val starred = tasks.filter { it.starred && it.listId in titles && TaskOrganizer.matches(it, query) }
         val active = starred.filter { !it.completed }
         val sections = when (sort) {
-            SortMode.DATE -> TaskOrganizer.dateSections(active, today, compact = false)
+            SortMode.MY_ORDER -> listOf(TaskSection("starred", null,
+                active.sortedWith(compareBy<Task> { ranks[it.id] ?: Int.MIN_VALUE }.thenBy { it.position }).map { TaskNode(it) }))
+            SortMode.DATE -> TaskOrganizer.dateSections(active, today, compact = false).map { section ->
+                section.copy(nodes = section.nodes.sortedWith(compareBy<TaskNode> { it.task.dueDate }
+                    .thenBy { ranks[it.task.id] ?: Int.MIN_VALUE }.thenBy { it.task.position }))
+            }
             SortMode.TITLE -> listOf(TaskSection("starred", null, active.sortedBy { it.title.lowercase() }.map { TaskNode(it) }))
             else -> listOf(TaskSection("starred", null, active.sortedByDescending { it.starredAt ?: 0L }.map { TaskNode(it) }))
         }.filter { it.nodes.isNotEmpty() }
