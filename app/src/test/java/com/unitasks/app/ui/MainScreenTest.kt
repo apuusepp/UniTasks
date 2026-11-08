@@ -8,7 +8,12 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeLeft
 import androidx.compose.ui.test.swipeRight
@@ -102,6 +107,9 @@ class MainScreenTest {
         composeRule.onNodeWithText("Send invoice").assertIsDisplayed()
 
         // Switch unified grouping to "By date": Overdue header appears and rows show list badges
+        composeRule.onNodeWithTag("grouping_by_date").assertDoesNotExist()
+        composeRule.onNodeWithTag("filter_list:$workId").assertDoesNotExist()
+        composeRule.onNodeWithTag("btn_grouping").performClick()
         composeRule.onNodeWithTag("grouping_by_date").performClick()
         assertEquals(UnifiedGrouping.BY_DATE, vm.state.value.unifiedGrouping)
         composeRule.onNodeWithText("Overdue").assertIsDisplayed()
@@ -109,6 +117,7 @@ class MainScreenTest {
         composeRule.onNodeWithText("Send invoice").assertIsDisplayed()
 
         // Switch unified grouping to "None": no section headers, each task shows its list badge
+        composeRule.onNodeWithTag("btn_grouping").performClick()
         composeRule.onNodeWithTag("grouping_none").performClick()
         assertEquals(UnifiedGrouping.NONE, vm.state.value.unifiedGrouping)
         composeRule.onNodeWithText("Overdue").assertDoesNotExist()
@@ -120,11 +129,32 @@ class MainScreenTest {
         composeRule.onNodeWithTag("sort_option:TITLE").performClick()
         assertEquals(SortMode.TITLE, vm.state.value.allTasksSort)
 
-        // Filter out the "Work" list via its filter chip, then restore it
-        composeRule.onNodeWithTag("filter_list:$workId").performClick()
+        // Filters live in a sheet, keeping the task view to one compact row.
+        composeRule.onNodeWithTag("btn_list_filter").performClick()
+        composeRule.onNodeWithTag("filter_list:$workId").assertIsDisplayed()
+            .performSemanticsAction(SemanticsActions.OnClick) { it() }
+        composeRule.waitForIdle()
+        assertEquals(setOf(workId), vm.state.value.hiddenListIds)
+        composeRule.onNodeWithTag("filter_done").performSemanticsAction(SemanticsActions.OnClick) { it() }
+        composeRule.waitForIdle()
         composeRule.onNodeWithText("Buy coffee").assertIsDisplayed()
         composeRule.onNodeWithText("Send invoice").assertDoesNotExist()
-        composeRule.onNodeWithTag("filter_list:$workId").performClick()
+        composeRule.onNodeWithText("  Lists 1/2").assertIsDisplayed()
+        composeRule.onNodeWithTag("btn_list_filter").performClick()
+        composeRule.onNodeWithTag("filter_show_all").performSemanticsAction(SemanticsActions.OnClick) { it() }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("filter_done").performSemanticsAction(SemanticsActions.OnClick) { it() }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Send invoice").assertIsDisplayed()
+
+        // A completely hidden view explains the filter and offers a direct reset.
+        composeRule.onNodeWithTag("btn_list_filter").performClick()
+        composeRule.onNodeWithTag("filter_list:$personalId").performSemanticsAction(SemanticsActions.OnClick) { it() }
+        composeRule.onNodeWithTag("filter_list:$workId").performSemanticsAction(SemanticsActions.OnClick) { it() }
+        composeRule.onNodeWithTag("filter_done").performSemanticsAction(SemanticsActions.OnClick) { it() }
+        composeRule.onNodeWithText("No lists selected").assertIsDisplayed()
+        composeRule.onNodeWithTag("empty_show_all_lists").performClick()
+        composeRule.onNodeWithText("Send invoice").assertIsDisplayed()
 
         // Swipe left on the pager from "All tasks" -> "My Tasks" list tab, then swipe left -> "Work" list tab
         composeRule.onNodeWithTag("tasks_pager").performTouchInput { swipeLeft() }
@@ -142,13 +172,15 @@ class MainScreenTest {
 
         // Switch to the Starred tab and complete the task
         composeRule.onNodeWithTag("tab_starred").performClick()
-        composeRule.onNodeWithText("Buy coffee").assertIsDisplayed()
+        composeRule.waitForIdle()
+        assertEquals(SelectedTab.Starred, vm.state.value.selectedTab)
+        composeRule.onNode(hasText("Buy coffee") and hasAnyAncestor(hasTestTag("tasks_list"))).assertIsDisplayed()
 
-        composeRule.onNodeWithTag("complete:$taskAId").performClick()
+        composeRule.onNode(hasTestTag("complete:$taskAId") and hasAnyAncestor(hasTestTag("tasks_list"))).performClick()
         composeRule.waitUntil(timeoutMillis = 5_000) {
             composeRule.onAllNodesWithText("Completed (1)").fetchSemanticsNodes().isNotEmpty()
         }
-        composeRule.onNodeWithText("Completed (1)").assertIsDisplayed()
+        composeRule.onNode(hasText("Completed (1)") and hasAnyAncestor(hasTestTag("tasks_list"))).assertIsDisplayed()
     }
 }
 

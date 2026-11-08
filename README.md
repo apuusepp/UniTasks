@@ -7,7 +7,7 @@ Native Android (Kotlin + Jetpack Compose + Material 3 + Room) task manager with 
 - **Unified "All tasks" view** (default tab):
   - **Group by list**: collapsible section per list with accent color, active task counter, and inline `+` button to add directly into any list.
   - **Group by date**: chronological buckets (*Overdue*, *Today*, *Tomorrow*, *Next 7 days*, *Later*, *No date*) across all lists, with a colored list badge on every task row.
-  - **List filter chips**: show/hide individual lists in the unified view.
+  - **Compact view controls**: one toolbar for grouping, sorting, and list filtering; choose visible lists in a scrollable sheet with a selection count and a quick **Show all lists** reset.
   - **Global search** across all lists.
 - **Google Tasks feature parity**:
   - Multiple task lists (create, rename, delete; default list protected from deletion).
@@ -20,6 +20,7 @@ Native Android (Kotlin + Jetpack Compose + Material 3 + Room) task manager with 
   - Read-only source links (e.g. Gmail / Docs links attached to synced tasks).
   - Local due-date/time reminder notifications (`AlarmManager`) with a *Mark completed* notification action and boot reschedule receiver.
   - Two-way offline-first sync with the **Google Tasks REST API v1** (`SyncEngine` + `WorkManager`).
+- **Add from other apps**: share plain text or links to **Add to UniTasks**, or select text and choose **Add to UniTasks** from Android's context menu. Edit the prefilled title/details, choose a destination list, then save or cancel. Works without signing in; shared content is saved only after confirmation. File/image attachments are not supported.
 
 ## Enabling Google Tasks API Sync
 

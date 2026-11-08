@@ -1,9 +1,7 @@
 package com.unitasks.app.ui
 
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,7 +18,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -38,18 +35,15 @@ import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material.icons.outlined.CheckCircleOutline
 import androidx.compose.material.icons.outlined.Layers
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.AssistChip
 import androidx.compose.material3.BottomAppBar
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SecondaryScrollableTabRow
@@ -253,7 +247,14 @@ fun MainScreen(
                         (pageTab == SelectedTab.AllTasks && state.unifiedGrouping != UnifiedGrouping.BY_LIST)
 
                     val allEmpty = pageSections.all { it.nodes.isEmpty() } && pageCompleted.isEmpty()
-                    if (allEmpty && (pageTab != SelectedTab.AllTasks || state.unifiedGrouping != UnifiedGrouping.BY_LIST)) {
+                    val noListsSelected = pageTab == SelectedTab.AllTasks && state.lists.isNotEmpty() &&
+                        state.lists.all { it.id in state.hiddenListIds }
+                    if (noListsSelected) {
+                        EmptyTasksPlaceholder(
+                            selectedTab = pageTab, isSearching = false,
+                            onShowAllLists = { state.lists.forEach { onToggleListFilter(it.id) } },
+                        )
+                    } else if (allEmpty && (pageTab != SelectedTab.AllTasks || state.unifiedGrouping != UnifiedGrouping.BY_LIST)) {
                         EmptyTasksPlaceholder(selectedTab = pageTab, isSearching = state.searchQuery.isNotBlank())
                     } else {
                         LazyColumn(
@@ -658,101 +659,6 @@ private fun TasksTabBar(
     }
 }
 
-/**
- * Controls shown at the top of the unified "All tasks" view:
- * 1. Switch between grouping by list, grouping by due date, or no grouping (flat list with per-task list badges).
- * 2. Quick sort button for the unified view.
- * 3. Filter chips to include/exclude individual lists from the unified view.
- */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun UnifiedControlsRow(
-    lists: List<TaskList>,
-    grouping: UnifiedGrouping,
-    sortMode: SortMode,
-    hiddenListIds: Set<String>,
-    onSetGrouping: (UnifiedGrouping) -> Unit,
-    onOpenSort: () -> Unit,
-    onToggleListFilter: (String) -> Unit,
-) {
-    val sortLabel = when (sortMode) {
-        SortMode.MY_ORDER -> "My order"
-        SortMode.DATE -> "Date"
-        SortMode.STARRED_RECENTLY -> "Starred"
-        SortMode.TITLE -> "Title"
-    }
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.surfaceContainerLow)
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-        ) {
-            Text(
-                text = "Group:",
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            FilterChip(
-                selected = grouping == UnifiedGrouping.BY_LIST,
-                onClick = { onSetGrouping(UnifiedGrouping.BY_LIST) },
-                label = { Text("List") },
-                modifier = Modifier.testTag("grouping_by_list"),
-            )
-            FilterChip(
-                selected = grouping == UnifiedGrouping.BY_DATE,
-                onClick = { onSetGrouping(UnifiedGrouping.BY_DATE) },
-                label = { Text("Date") },
-                modifier = Modifier.testTag("grouping_by_date"),
-            )
-            FilterChip(
-                selected = grouping == UnifiedGrouping.NONE,
-                onClick = { onSetGrouping(UnifiedGrouping.NONE) },
-                label = { Text("None") },
-                modifier = Modifier.testTag("grouping_none"),
-            )
-            AssistChip(
-                onClick = onOpenSort,
-                label = { Text(sortLabel) },
-                leadingIcon = {
-                    Icon(
-                        Icons.Default.SwapVert,
-                        contentDescription = "Sort all tasks",
-                        modifier = Modifier.size(16.dp),
-                    )
-                },
-                modifier = Modifier.testTag("btn_all_tasks_sort"),
-            )
-        }
-        if (lists.size > 1) {
-            Row(
-                modifier = Modifier.horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                lists.forEach { list ->
-                    val visible = list.id !in hiddenListIds
-                    val accent = listAccentColor(list.id)
-                    FilterChip(
-                        selected = visible,
-                        onClick = { onToggleListFilter(list.id) },
-                        label = { Text(list.title) },
-                        leadingIcon = {
-                            Box(modifier = Modifier.size(8.dp).clip(CircleShape).background(accent))
-                        },
-                        modifier = Modifier.testTag("filter_list:${list.id}"),
-                    )
-                }
-            }
-        }
-    }
-    HorizontalDivider()
-}
-
 @Composable
 private fun SectionHeader(
     section: TaskSection,
@@ -806,7 +712,11 @@ private fun SectionHeader(
 }
 
 @Composable
-private fun EmptyTasksPlaceholder(selectedTab: SelectedTab, isSearching: Boolean) {
+private fun EmptyTasksPlaceholder(
+    selectedTab: SelectedTab,
+    isSearching: Boolean,
+    onShowAllLists: (() -> Unit)? = null,
+) {
     Box(modifier = Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Icon(
@@ -817,6 +727,7 @@ private fun EmptyTasksPlaceholder(selectedTab: SelectedTab, isSearching: Boolean
             )
             Text(
                 text = when {
+                    onShowAllLists != null -> "No lists selected"
                     isSearching -> "No matching tasks"
                     selectedTab == SelectedTab.Starred -> "No starred tasks"
                     else -> "No tasks yet"
@@ -825,6 +736,7 @@ private fun EmptyTasksPlaceholder(selectedTab: SelectedTab, isSearching: Boolean
             )
             Text(
                 text = when {
+                    onShowAllLists != null -> "Choose which lists to show your tasks from"
                     isSearching -> "Try a different search term"
                     selectedTab == SelectedTab.Starred -> "Mark important tasks with a star so you can find them easily here"
                     else -> "Add your to-dos and keep track of them across all your lists"
@@ -832,6 +744,11 @@ private fun EmptyTasksPlaceholder(selectedTab: SelectedTab, isSearching: Boolean
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            if (onShowAllLists != null) {
+                TextButton(onClick = onShowAllLists, modifier = Modifier.testTag("empty_show_all_lists")) {
+                    Text("Show all lists")
+                }
+            }
         }
     }
 }

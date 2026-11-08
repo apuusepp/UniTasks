@@ -11,6 +11,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -40,6 +42,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.Saver
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -76,16 +80,27 @@ fun AddTaskSheet(
         starred: Boolean,
         recurrence: RecurrenceRule?,
     ) -> Unit,
+    initialTitle: String = "",
+    initialNotes: String = "",
+    heading: String? = null,
+    isSaving: Boolean = false,
+    errorMessage: String? = null,
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    var title by remember { mutableStateOf("") }
-    var notes by remember { mutableStateOf("") }
-    var showNotes by remember { mutableStateOf(false) }
-    var dueDate by remember { mutableStateOf<LocalDate?>(null) }
-    var dueTime by remember { mutableStateOf<LocalTime?>(null) }
-    var recurrence by remember { mutableStateOf<RecurrenceRule?>(null) }
-    var starred by remember { mutableStateOf(initialStarred) }
-    var selectedListId by remember { mutableStateOf(initialListId) }
+    var title by rememberSaveable { mutableStateOf(initialTitle) }
+    var notes by rememberSaveable { mutableStateOf(initialNotes) }
+    var showNotes by rememberSaveable { mutableStateOf(initialNotes.isNotBlank()) }
+    var dueDate by rememberSaveable(stateSaver = Saver<LocalDate?, String>(
+        save = { it?.toString() }, restore = { LocalDate.parse(it) },
+    )) { mutableStateOf(null) }
+    var dueTime by rememberSaveable(stateSaver = Saver<LocalTime?, String>(
+        save = { it?.toString() }, restore = { LocalTime.parse(it) },
+    )) { mutableStateOf(null) }
+    var recurrence by rememberSaveable(stateSaver = Saver<RecurrenceRule?, String>(
+        save = { it?.encode() }, restore = { RecurrenceRule.decode(it) },
+    )) { mutableStateOf(null) }
+    var starred by rememberSaveable { mutableStateOf(initialStarred) }
+    var selectedListId by rememberSaveable { mutableStateOf(initialListId) }
     var showListMenu by remember { mutableStateOf(false) }
     var showDateDialog by remember { mutableStateOf(false) }
     val focusRequester = remember { FocusRequester() }
@@ -93,7 +108,7 @@ fun AddTaskSheet(
     LaunchedEffect(Unit) { runCatching { focusRequester.requestFocus() } }
 
     fun submit() {
-        if (title.isBlank()) return
+        if (title.isBlank() || isSaving || lists.isEmpty()) return
         onSave(selectedListId, title, notes, dueDate, dueTime, starred, recurrence)
     }
 
@@ -102,10 +117,19 @@ fun AddTaskSheet(
             modifier = Modifier
                 .fillMaxWidth()
                 .imePadding()
+                .verticalScroll(rememberScrollState())
                 .padding(horizontal = 16.dp)
                 .padding(bottom = 12.dp),
         ) {
-            if (allowListSelection && lists.size > 1 && parentId == null) {
+            if (heading != null) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(heading, style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+                    IconButton(onClick = onDismiss, enabled = !isSaving) {
+                        Icon(Icons.Outlined.Close, contentDescription = "Cancel shared task")
+                    }
+                }
+            }
+            if (allowListSelection && lists.isNotEmpty() && parentId == null) {
                 Box {
                     val currentTitle = lists.firstOrNull { it.id == selectedListId }?.title ?: "List"
                     AssistChip(
@@ -132,6 +156,7 @@ fun AddTaskSheet(
             )
             TextField(
                 value = title,
+                enabled = !isSaving,
                 onValueChange = { title = it },
                 placeholder = { Text(if (parentId == null) "New task" else "New subtask") },
                 singleLine = true,
@@ -144,12 +169,17 @@ fun AddTaskSheet(
             if (showNotes) {
                 TextField(
                     value = notes,
+                    enabled = !isSaving,
+                    maxLines = 4,
                     onValueChange = { notes = it },
                     placeholder = { Text("Add details") },
                     colors = transparent,
                     textStyle = MaterialTheme.typography.bodyMedium,
                     modifier = Modifier.fillMaxWidth().testTag("add_notes"),
                 )
+            }
+            if (errorMessage != null) {
+                Text(errorMessage, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
             }
             if (dueDate != null) {
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -196,10 +226,10 @@ fun AddTaskSheet(
                 Spacer(Modifier.weight(1f))
                 TextButton(
                     onClick = ::submit,
-                    enabled = title.isNotBlank(),
+                    enabled = title.isNotBlank() && !isSaving && lists.isNotEmpty(),
                     modifier = Modifier.testTag("add_save"),
                 ) {
-                    Text("Save")
+                    Text(if (isSaving) "Saving…" else "Save")
                 }
             }
         }
