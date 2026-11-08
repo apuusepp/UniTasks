@@ -37,6 +37,12 @@ class Settings(context: Context, name: String = "unitasks_settings") {
     )
     val starredSort: StateFlow<SortMode> = _starredSort.asStateFlow()
 
+    private val _allTasksSort = MutableStateFlow(
+        runCatching { SortMode.valueOf(prefs.getString(KEY_ALL_TASKS_SORT, SortMode.MY_ORDER.name)!!) }
+            .getOrDefault(SortMode.MY_ORDER),
+    )
+    val allTasksSort: StateFlow<SortMode> = _allTasksSort.asStateFlow()
+
     private val _lastSyncAt = MutableStateFlow(prefs.getLong(KEY_LAST_SYNC_AT, 0L).takeIf { it > 0 })
     val lastSyncAt: StateFlow<Long?> = _lastSyncAt.asStateFlow()
 
@@ -66,6 +72,11 @@ class Settings(context: Context, name: String = "unitasks_settings") {
         _starredSort.value = sort
     }
 
+    fun setAllTasksSort(sort: SortMode) {
+        prefs.edit().putString(KEY_ALL_TASKS_SORT, sort.name).apply()
+        _allTasksSort.value = sort
+    }
+
     /** RFC3339 `updatedMin` watermark per remote list id for incremental sync. */
     fun getListSyncToken(remoteListId: String): String? = prefs.getString(KEY_LIST_SYNC + remoteListId, null)
 
@@ -86,6 +97,7 @@ class Settings(context: Context, name: String = "unitasks_settings") {
         _grouping.value = UnifiedGrouping.BY_LIST
         _hiddenLists.value = emptySet()
         _starredSort.value = SortMode.STARRED_RECENTLY
+        _allTasksSort.value = SortMode.MY_ORDER
         _lastSyncAt.value = null
     }
 
@@ -95,6 +107,7 @@ class Settings(context: Context, name: String = "unitasks_settings") {
         const val KEY_GROUPING = "unified_grouping"
         const val KEY_HIDDEN = "hidden_lists"
         const val KEY_STARRED_SORT = "starred_sort"
+        const val KEY_ALL_TASKS_SORT = "all_tasks_sort"
         const val KEY_DEFAULT_LIST = "default_list"
         const val KEY_LIST_SYNC = "list_sync_"
         const val KEY_LAST_SYNC_AT = "last_sync_at"

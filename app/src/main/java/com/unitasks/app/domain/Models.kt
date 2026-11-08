@@ -43,4 +43,4 @@ data class TaskNode(
 enum class SortMode { MY_ORDER, DATE, STARRED_RECENTLY, TITLE }
 
 /** How the unified "All tasks" view groups tasks. */
-enum class UnifiedGrouping { BY_LIST, BY_DATE }
+enum class UnifiedGrouping { BY_LIST, BY_DATE, NONE }

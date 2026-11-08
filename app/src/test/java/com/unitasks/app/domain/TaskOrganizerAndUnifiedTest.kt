@@ -112,4 +112,56 @@ class TaskOrganizerAndUnifiedTest {
         )
         assertEquals(listOf("t2", "t1"), starred.sections.single().nodes.map { it.task.id })
     }
+
+    @Test
+    fun unified_none_grouping_produces_flat_list_and_sorts_across_all_lists() {
+        val tasks = listOf(
+            Task(id = "t1", listId = "l1", title = "Zebra task", position = 1.0, dueDate = today.plusDays(5), starred = false),
+            Task(id = "t2", listId = "l2", title = "Alpha task", position = 1.0, dueDate = today.plusDays(1), starred = true, starredAt = 300L),
+            Task(id = "t3", listId = "l3", title = "Middle task", position = 2.0, dueDate = today.plusDays(2), starred = true, starredAt = 100L),
+        )
+        val lists = listOf(personal, work, shopping)
+
+        // Title sort across ungrouped All tasks
+        val byTitle = UnifiedViewBuilder.buildAllTasks(
+            lists = lists,
+            tasks = tasks,
+            grouping = UnifiedGrouping.NONE,
+            sort = SortMode.TITLE,
+            hiddenListIds = emptySet(),
+            query = "",
+            today = today,
+        )
+        assertEquals(1, byTitle.sections.size)
+        assertEquals(null, byTitle.sections.single().title)
+        assertEquals(listOf("t2", "t3", "t1"), byTitle.sections.single().nodes.map { it.task.id })
+        assertEquals("My Tasks", byTitle.listTitles["l1"])
+        assertEquals("Work", byTitle.listTitles["l2"])
+        assertEquals("Shopping", byTitle.listTitles["l3"])
+
+        // Date sort across ungrouped All tasks
+        val byDate = UnifiedViewBuilder.buildAllTasks(
+            lists = lists,
+            tasks = tasks,
+            grouping = UnifiedGrouping.NONE,
+            sort = SortMode.DATE,
+            hiddenListIds = emptySet(),
+            query = "",
+            today = today,
+        )
+        assertEquals(listOf("t2", "t3", "t1"), byDate.sections.single().nodes.map { it.task.id })
+
+        // Starred recently sort across ungrouped All tasks
+        val byStarred = UnifiedViewBuilder.buildAllTasks(
+            lists = lists,
+            tasks = tasks,
+            grouping = UnifiedGrouping.NONE,
+            sort = SortMode.STARRED_RECENTLY,
+            hiddenListIds = emptySet(),
+            query = "",
+            today = today,
+        )
+        assertEquals(listOf("t2", "t3", "t1"), byStarred.sections.single().nodes.map { it.task.id })
+    }
 }
+

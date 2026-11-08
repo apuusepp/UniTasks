@@ -18,6 +18,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
@@ -36,6 +38,7 @@ import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material.icons.outlined.CheckCircleOutline
 import androidx.compose.material.icons.outlined.Layers
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.BottomAppBar
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -50,9 +53,6 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SecondaryScrollableTabRow
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -70,6 +70,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -165,10 +166,8 @@ fun MainScreen(
         bottomBar = {
             BottomAppBar(
                 actions = {
-                    if (state.selectedTab !is SelectedTab.AllTasks) {
-                        IconButton(onClick = { showSortSheet = true }, modifier = Modifier.testTag("btn_sort")) {
-                            Icon(Icons.Default.SwapVert, contentDescription = "Sort")
-                        }
+                    IconButton(onClick = { showSortSheet = true }, modifier = Modifier.testTag("btn_sort")) {
+                        Icon(Icons.Default.SwapVert, contentDescription = "Sort")
                     }
                     IconButton(onClick = { showMoreSheet = true }, modifier = Modifier.testTag("btn_more")) {
                         Icon(Icons.Default.MoreVert, contentDescription = "More options")
@@ -189,6 +188,27 @@ fun MainScreen(
         },
         snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { padding ->
+        val pages = remember(state.lists) {
+            listOf(SelectedTab.Starred, SelectedTab.AllTasks) + state.lists.map { SelectedTab.ListTab(it.id) }
+        }
+        val selectedIndex = pages.indexOf(state.selectedTab).let { if (it >= 0) it else 1.coerceAtMost(pages.lastIndex) }
+        val pagerState = rememberPagerState(initialPage = selectedIndex) { pages.size }
+        val currentSelectedTab by rememberUpdatedState(state.selectedTab)
+        val currentOnSelectTab by rememberUpdatedState(onSelectTab)
+
+        LaunchedEffect(selectedIndex) {
+            if (pagerState.currentPage != selectedIndex) {
+                pagerState.scrollToPage(selectedIndex)
+            }
+        }
+
+        LaunchedEffect(pagerState.settledPage) {
+            val pageTab = pages.getOrNull(pagerState.settledPage)
+            if (pageTab != null && pageTab != currentSelectedTab) {
+                currentOnSelectTab(pageTab)
+            }
+        }
+
         Column(modifier = Modifier.fillMaxSize().padding(padding)) {
             TasksTabBar(
                 lists = state.lists,
@@ -205,114 +225,133 @@ fun MainScreen(
             } else if (state.syncError != null) {
                 BannerRow(text = state.syncError, actionLabel = "Retry", onAction = onSyncNow)
             }
-            if (state.selectedTab == SelectedTab.AllTasks) {
-                UnifiedControlsRow(
-                    lists = state.lists,
-                    grouping = state.unifiedGrouping,
-                    hiddenListIds = state.hiddenListIds,
-                    onSetGrouping = onSetGrouping,
-                    onToggleListFilter = onToggleListFilter,
-                )
-            }
-            val showBadgeOnRows = state.selectedTab == SelectedTab.Starred ||
-                (state.selectedTab == SelectedTab.AllTasks && state.unifiedGrouping == UnifiedGrouping.BY_DATE)
 
-            val allEmpty = state.sections.all { it.nodes.isEmpty() } && state.completed.isEmpty()
-            if (allEmpty && state.selectedTab != SelectedTab.AllTasks) {
-                EmptyTasksPlaceholder(selectedTab = state.selectedTab, isSearching = state.searchQuery.isNotBlank())
-            } else {
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize().testTag("tasks_list"),
-                    contentPadding = PaddingValues(bottom = 88.dp),
-                ) {
-                    state.sections.forEach { section ->
-                        val isCollapsed = collapsedSections[section.key] == true
-                        if (section.title != null) {
-                            item(key = "header:${section.key}") {
-                                SectionHeader(
-                                    section = section,
-                                    collapsed = isCollapsed,
-                                    onToggleCollapse = { collapsedSections[section.key] = !isCollapsed },
-                                    onAddInList = section.listId?.let { lid -> { addSheetTargetListId = lid } },
-                                    onSelectList = section.listId?.let { lid -> { onSelectTab(SelectedTab.ListTab(lid)) } },
-                                )
-                            }
-                        }
-                        if (!isCollapsed) {
-                            if (section.nodes.isEmpty() && section.listId != null) {
-                                item(key = "empty:${section.key}") {
-                                    Text(
-                                        text = if (section.completedCount > 0) "All tasks completed (${section.completedCount})" else "No active tasks",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
-                                    )
-                                }
-                            }
-                            items(items = section.nodes, key = { "${section.key}:${it.task.id}" }) { node ->
-                                Column {
-                                    TaskRow(
-                                        task = node.task,
-                                        listBadge = if (showBadgeOnRows) state.listTitles[node.task.listId] else null,
-                                        today = today,
-                                        onToggleComplete = { onToggleComplete(node.task) },
-                                        onToggleStar = { onToggleStar(node.task.id) },
-                                        onClick = { onOpenTask(node.task.id) },
-                                        onDateClick = { editingDateForTask = node.task },
-                                    )
-                                    node.children.forEach { child ->
-                                        TaskRow(
-                                            task = child,
-                                            listBadge = null,
-                                            today = today,
-                                            onToggleComplete = { onToggleComplete(child) },
-                                            onToggleStar = { onToggleStar(child.id) },
-                                            onClick = { onOpenTask(child.id) },
-                                            onDateClick = { editingDateForTask = child },
-                                            indented = true,
+            HorizontalPager(
+                state = pagerState,
+                modifier = Modifier.fillMaxSize().testTag("tasks_pager"),
+            ) { pageIndex ->
+                val pageTab = pages.getOrNull(pageIndex) ?: SelectedTab.AllTasks
+                val (pageSections, pageCompleted) = if (pageTab == state.selectedTab) {
+                    state.sections to state.completed
+                } else {
+                    state.contentForTab(pageTab, today)
+                }
+
+                Column(modifier = Modifier.fillMaxSize()) {
+                    if (pageTab == SelectedTab.AllTasks) {
+                        UnifiedControlsRow(
+                            lists = state.lists,
+                            grouping = state.unifiedGrouping,
+                            sortMode = state.allTasksSort,
+                            hiddenListIds = state.hiddenListIds,
+                            onSetGrouping = onSetGrouping,
+                            onOpenSort = { showSortSheet = true },
+                            onToggleListFilter = onToggleListFilter,
+                        )
+                    }
+                    val showBadgeOnRows = pageTab == SelectedTab.Starred ||
+                        (pageTab == SelectedTab.AllTasks && state.unifiedGrouping != UnifiedGrouping.BY_LIST)
+
+                    val allEmpty = pageSections.all { it.nodes.isEmpty() } && pageCompleted.isEmpty()
+                    if (allEmpty && (pageTab != SelectedTab.AllTasks || state.unifiedGrouping != UnifiedGrouping.BY_LIST)) {
+                        EmptyTasksPlaceholder(selectedTab = pageTab, isSearching = state.searchQuery.isNotBlank())
+                    } else {
+                        LazyColumn(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .then(if (pageTab == state.selectedTab) Modifier.testTag("tasks_list") else Modifier),
+                            contentPadding = PaddingValues(bottom = 88.dp),
+                        ) {
+                            pageSections.forEach { section ->
+                                val isCollapsed = collapsedSections[section.key] == true
+                                if (section.title != null) {
+                                    item(key = "header:${section.key}") {
+                                        SectionHeader(
+                                            section = section,
+                                            collapsed = isCollapsed,
+                                            onToggleCollapse = { collapsedSections[section.key] = !isCollapsed },
+                                            onAddInList = section.listId?.let { lid -> { addSheetTargetListId = lid } },
+                                            onSelectList = section.listId?.let { lid -> { onSelectTab(SelectedTab.ListTab(lid)) } },
                                         )
                                     }
                                 }
-                            }
-                        }
-                    }
-
-                    if (state.completed.isNotEmpty()) {
-                        item(key = "completed_header") {
-                            Column {
-                                HorizontalDivider(modifier = Modifier.padding(top = 8.dp))
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable { completedExpanded = !completedExpanded }
-                                        .padding(horizontal = 16.dp, vertical = 14.dp)
-                                        .testTag("completed_header"),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Text(
-                                        text = "Completed (${state.completed.size})",
-                                        style = MaterialTheme.typography.titleSmall,
-                                        modifier = Modifier.weight(1f),
-                                    )
-                                    Icon(
-                                        imageVector = if (completedExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                                        contentDescription = null,
-                                    )
+                                if (!isCollapsed) {
+                                    if (section.nodes.isEmpty() && section.listId != null) {
+                                        item(key = "empty:${section.key}") {
+                                            Text(
+                                                text = if (section.completedCount > 0) "All tasks completed (${section.completedCount})" else "No active tasks",
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+                                            )
+                                        }
+                                    }
+                                    items(items = section.nodes, key = { "${section.key}:${it.task.id}" }) { node ->
+                                        Column {
+                                            TaskRow(
+                                                task = node.task,
+                                                listBadge = if (showBadgeOnRows) state.listTitles[node.task.listId] else null,
+                                                today = today,
+                                                onToggleComplete = { onToggleComplete(node.task) },
+                                                onToggleStar = { onToggleStar(node.task.id) },
+                                                onClick = { onOpenTask(node.task.id) },
+                                                onDateClick = { editingDateForTask = node.task },
+                                            )
+                                            node.children.forEach { child ->
+                                                TaskRow(
+                                                    task = child,
+                                                    listBadge = if (showBadgeOnRows) state.listTitles[child.listId] else null,
+                                                    today = today,
+                                                    onToggleComplete = { onToggleComplete(child) },
+                                                    onToggleStar = { onToggleStar(child.id) },
+                                                    onClick = { onOpenTask(child.id) },
+                                                    onDateClick = { editingDateForTask = child },
+                                                    indented = true,
+                                                )
+                                            }
+                                        }
+                                    }
                                 }
                             }
-                        }
-                        if (completedExpanded) {
-                            val showCompletedBadge = state.selectedTab !is SelectedTab.ListTab
-                            items(items = state.completed, key = { "done:${it.id}" }) { done ->
-                                TaskRow(
-                                    task = done,
-                                    listBadge = if (showCompletedBadge) state.listTitles[done.listId] else null,
-                                    today = today,
-                                    onToggleComplete = { onToggleComplete(done) },
-                                    onToggleStar = { onToggleStar(done.id) },
-                                    onClick = { onOpenTask(done.id) },
-                                    onDateClick = {},
-                                )
+
+                            if (pageCompleted.isNotEmpty()) {
+                                item(key = "completed_header") {
+                                    Column {
+                                        HorizontalDivider(modifier = Modifier.padding(top = 8.dp))
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clickable { completedExpanded = !completedExpanded }
+                                                .padding(horizontal = 16.dp, vertical = 14.dp)
+                                                .testTag("completed_header"),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                        ) {
+                                            Text(
+                                                text = "Completed (${pageCompleted.size})",
+                                                style = MaterialTheme.typography.titleSmall,
+                                                modifier = Modifier.weight(1f),
+                                            )
+                                            Icon(
+                                                imageVector = if (completedExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                                contentDescription = null,
+                                            )
+                                        }
+                                    }
+                                }
+                                if (completedExpanded) {
+                                    val showCompletedBadge = pageTab !is SelectedTab.ListTab
+                                    items(items = pageCompleted, key = { "done:${it.id}" }) { done ->
+                                        TaskRow(
+                                            task = done,
+                                            listBadge = if (showCompletedBadge) state.listTitles[done.listId] else null,
+                                            today = today,
+                                            onToggleComplete = { onToggleComplete(done) },
+                                            onToggleStar = { onToggleStar(done.id) },
+                                            onClick = { onOpenTask(done.id) },
+                                            onDateClick = {},
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
@@ -399,7 +438,8 @@ fun MainScreen(
     if (showSortSheet) {
         val currentSort = when (state.selectedTab) {
             SelectedTab.Starred -> state.starredSort
-            else -> state.currentList?.sortMode ?: SortMode.MY_ORDER
+            SelectedTab.AllTasks -> state.allTasksSort
+            is SelectedTab.ListTab -> state.currentList?.sortMode ?: SortMode.MY_ORDER
         }
         val options = if (state.selectedTab == SelectedTab.Starred) {
             listOf(SortMode.STARRED_RECENTLY to "Starred recently", SortMode.DATE to "Date", SortMode.TITLE to "Title")
@@ -411,72 +451,82 @@ fun MainScreen(
                 SortMode.TITLE to "Title",
             )
         }
-        ModalBottomSheet(onDismissRequest = { showSortSheet = false }) {
-            Column(modifier = Modifier.padding(bottom = 24.dp)) {
-                Text(
-                    text = "Sort by",
-                    style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
-                )
-                options.forEach { (mode, label) ->
-                    ListItem(
-                        headlineContent = { Text(label) },
-                        trailingContent = { if (mode == currentSort) Icon(Icons.Default.Check, contentDescription = null) },
-                        modifier = Modifier.clickable {
-                            onSetSort(mode)
-                            showSortSheet = false
-                        },
-                    )
+        AlertDialog(
+            onDismissRequest = { showSortSheet = false },
+            title = { Text("Sort by") },
+            text = {
+                Column {
+                    options.forEach { (mode, label) ->
+                        ListItem(
+                            headlineContent = { Text(label) },
+                            trailingContent = { if (mode == currentSort) Icon(Icons.Default.Check, contentDescription = null) },
+                            modifier = Modifier
+                                .testTag("sort_option:${mode.name}")
+                                .clickable {
+                                    onSetSort(mode)
+                                    showSortSheet = false
+                                },
+                        )
+                    }
                 }
-            }
-        }
+            },
+            confirmButton = {
+                TextButton(onClick = { showSortSheet = false }) { Text("Close") }
+            },
+        )
     }
 
     if (showMoreSheet) {
         val list = state.currentList
-        ModalBottomSheet(onDismissRequest = { showMoreSheet = false }) {
-            Column(modifier = Modifier.padding(bottom = 24.dp)) {
-                if (list != null) {
-                    ListItem(
-                        headlineContent = { Text("Rename list") },
-                        modifier = Modifier.clickable {
-                            showMoreSheet = false
-                            showRenameListDialog = true
-                        },
-                    )
+        val hasCompleted = state.completed.isNotEmpty()
+        AlertDialog(
+            onDismissRequest = { showMoreSheet = false },
+            title = { Text(list?.title ?: "Options") },
+            text = {
+                Column {
+                    if (list != null) {
+                        ListItem(
+                            headlineContent = { Text("Rename list") },
+                            modifier = Modifier.clickable {
+                                showMoreSheet = false
+                                showRenameListDialog = true
+                            },
+                        )
+                        ListItem(
+                            headlineContent = {
+                                Text(
+                                    "Delete list",
+                                    color = if (list.isDefault) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+                                )
+                            },
+                            supportingContent = if (list.isDefault) ({ Text("Default list can't be deleted") }) else null,
+                            modifier = Modifier.clickable(enabled = !list.isDefault) {
+                                showMoreSheet = false
+                                showDeleteListConfirm = true
+                            },
+                        )
+                        HorizontalDivider()
+                    }
                     ListItem(
                         headlineContent = {
                             Text(
-                                "Delete list",
-                                color = if (list.isDefault) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+                                "Delete all completed tasks",
+                                color = if (hasCompleted) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         },
-                        supportingContent = if (list.isDefault) ({ Text("Default list can't be deleted") }) else null,
-                        modifier = Modifier.clickable(enabled = !list.isDefault) {
-                            showMoreSheet = false
-                            showDeleteListConfirm = true
-                        },
+                        modifier = Modifier
+                            .testTag("menu_clear_completed")
+                            .clickable(enabled = hasCompleted) {
+                                showMoreSheet = false
+                                onClearCompleted(list?.id)
+                            },
                     )
-                    HorizontalDivider()
                 }
-                val hasCompleted = state.completed.isNotEmpty()
-                ListItem(
-                    headlineContent = {
-                        Text(
-                            "Delete all completed tasks",
-                            color = if (hasCompleted) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    },
-                    modifier = Modifier
-                        .testTag("menu_clear_completed")
-                        .clickable(enabled = hasCompleted) {
-                            showMoreSheet = false
-                            onClearCompleted(list?.id)
-                        },
-                )
-            }
-        }
+            },
+            confirmButton = {
+                TextButton(onClick = { showMoreSheet = false }) { Text("Close") }
+            },
+        )
     }
 
     if (showAccountDialog) {
@@ -610,18 +660,27 @@ private fun TasksTabBar(
 
 /**
  * Controls shown at the top of the unified "All tasks" view:
- * 1. Segmented switch between grouping by list vs. grouping by due date.
- * 2. Filter chips to include/exclude individual lists from the unified view.
+ * 1. Switch between grouping by list, grouping by due date, or no grouping (flat list with per-task list badges).
+ * 2. Quick sort button for the unified view.
+ * 3. Filter chips to include/exclude individual lists from the unified view.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun UnifiedControlsRow(
     lists: List<TaskList>,
     grouping: UnifiedGrouping,
+    sortMode: SortMode,
     hiddenListIds: Set<String>,
     onSetGrouping: (UnifiedGrouping) -> Unit,
+    onOpenSort: () -> Unit,
     onToggleListFilter: (String) -> Unit,
 ) {
+    val sortLabel = when (sortMode) {
+        SortMode.MY_ORDER -> "My order"
+        SortMode.DATE -> "Date"
+        SortMode.STARRED_RECENTLY -> "Starred"
+        SortMode.TITLE -> "Title"
+    }
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -631,11 +690,11 @@ private fun UnifiedControlsRow(
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
         ) {
             Text(
-                text = "Group by",
+                text = "Group:",
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -650,6 +709,24 @@ private fun UnifiedControlsRow(
                 onClick = { onSetGrouping(UnifiedGrouping.BY_DATE) },
                 label = { Text("Date") },
                 modifier = Modifier.testTag("grouping_by_date"),
+            )
+            FilterChip(
+                selected = grouping == UnifiedGrouping.NONE,
+                onClick = { onSetGrouping(UnifiedGrouping.NONE) },
+                label = { Text("None") },
+                modifier = Modifier.testTag("grouping_none"),
+            )
+            AssistChip(
+                onClick = onOpenSort,
+                label = { Text(sortLabel) },
+                leadingIcon = {
+                    Icon(
+                        Icons.Default.SwapVert,
+                        contentDescription = "Sort all tasks",
+                        modifier = Modifier.size(16.dp),
+                    )
+                },
+                modifier = Modifier.testTag("btn_all_tasks_sort"),
             )
         }
         if (lists.size > 1) {

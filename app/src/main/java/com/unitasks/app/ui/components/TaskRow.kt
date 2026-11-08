@@ -12,14 +12,12 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Link
@@ -30,10 +28,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
-import androidx.compose.material3.SwipeToDismissBox
-import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
-import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -51,7 +46,6 @@ import java.time.LocalDate
  * Single task row modelled on Google Tasks:
  * circle completion button, title, optional details preview, due date/time + repeat chip,
  * optional link chip, optional list badge (for the unified / starred views), and star toggle.
- * Supports swipe-to-complete.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -67,142 +61,121 @@ fun TaskRow(
     indented: Boolean = false,
     trailingDragHandle: (@Composable () -> Unit)? = null,
 ) {
-    val dismissState = rememberSwipeToDismissBoxState(
-        confirmValueChange = { value ->
-            if (value != SwipeToDismissBoxValue.Settled) onToggleComplete()
-            false // snap back; the row moves to/from Completed via state update
-        },
-    )
-    SwipeToDismissBox(
-        state = dismissState,
-        modifier = modifier.testTag("task:${task.id}"),
-        backgroundContent = {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(MaterialTheme.colorScheme.primaryContainer)
-                    .padding(horizontal = 24.dp),
-                contentAlignment = Alignment.CenterStart,
-            ) {
-                Icon(Icons.Default.Check, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimaryContainer)
-            }
-        },
+    val context = LocalContext.current
+    Row(
+        modifier = modifier
+            .testTag("task:${task.id}")
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surface)
+            .clickable(onClick = onClick)
+            .padding(
+                start = if (indented) 44.dp else 8.dp,
+                end = 4.dp,
+                top = 6.dp,
+                bottom = 6.dp,
+            ),
+        verticalAlignment = Alignment.Top,
     ) {
-        val context = LocalContext.current
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(MaterialTheme.colorScheme.surface)
-                .clickable(onClick = onClick)
-                .padding(
-                    start = if (indented) 44.dp else 8.dp,
-                    end = 4.dp,
-                    top = 6.dp,
-                    bottom = 6.dp,
-                ),
-            verticalAlignment = Alignment.Top,
+        IconButton(
+            onClick = onToggleComplete,
+            modifier = Modifier.size(40.dp).testTag("complete:${task.id}"),
         ) {
+            if (task.completed) {
+                Icon(
+                    Icons.Outlined.CheckCircle,
+                    contentDescription = "Mark uncompleted",
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+            } else {
+                Icon(
+                    Icons.Outlined.RadioButtonUnchecked,
+                    contentDescription = "Mark completed",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        Column(
+            modifier = Modifier.weight(1f).padding(top = 8.dp, bottom = 4.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Text(
+                text = task.title.ifBlank { "(No title)" },
+                style = MaterialTheme.typography.bodyLarge,
+                color = if (task.completed) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+                textDecoration = if (task.completed) TextDecoration.LineThrough else TextDecoration.None,
+            )
+            if (task.notes.isNotBlank() && !task.completed) {
+                Text(
+                    text = task.notes,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            val hasChips = (!task.completed && task.dueDate != null) || !task.linkUrl.isNullOrBlank() || listBadge != null
+            if (hasChips) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    if (!task.completed && task.dueDate != null) {
+                        DueChip(
+                            date = task.dueDate,
+                            time = task.dueTime,
+                            repeating = task.recurrence != null,
+                            today = today,
+                            onClick = onDateClick,
+                        )
+                    }
+                    if (!task.linkUrl.isNullOrBlank()) {
+                        Surface(
+                            shape = MaterialTheme.shapes.small,
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                            modifier = Modifier.clickable {
+                                runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(task.linkUrl))) }
+                            },
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Icon(Icons.Outlined.Link, contentDescription = null, modifier = Modifier.size(14.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text(
+                                    text = task.linkTitle?.ifBlank { null } ?: "Link",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    maxLines = 1,
+                                )
+                            }
+                        }
+                    }
+                    if (listBadge != null) {
+                        ListBadge(listId = task.listId, title = listBadge)
+                    }
+                }
+            }
+        }
+        if (!task.completed) {
             IconButton(
-                onClick = onToggleComplete,
-                modifier = Modifier.size(40.dp).testTag("complete:${task.id}"),
+                onClick = onToggleStar,
+                modifier = Modifier.size(40.dp).testTag("star:${task.id}"),
             ) {
-                if (task.completed) {
+                if (task.starred) {
                     Icon(
-                        Icons.Outlined.CheckCircle,
-                        contentDescription = "Mark uncompleted",
+                        Icons.Filled.Star,
+                        contentDescription = "Remove from Starred",
                         tint = MaterialTheme.colorScheme.primary,
                     )
                 } else {
                     Icon(
-                        Icons.Outlined.RadioButtonUnchecked,
-                        contentDescription = "Mark completed",
+                        Icons.Outlined.StarBorder,
+                        contentDescription = "Add to Starred",
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             }
-            Column(
-                modifier = Modifier.weight(1f).padding(top = 8.dp, bottom = 4.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                Text(
-                    text = task.title.ifBlank { "(No title)" },
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = if (task.completed) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
-                    textDecoration = if (task.completed) TextDecoration.LineThrough else TextDecoration.None,
-                )
-                if (task.notes.isNotBlank() && !task.completed) {
-                    Text(
-                        text = task.notes,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                val hasChips = (!task.completed && task.dueDate != null) || !task.linkUrl.isNullOrBlank() || listBadge != null
-                if (hasChips) {
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp),
-                    ) {
-                        if (!task.completed && task.dueDate != null) {
-                            DueChip(
-                                date = task.dueDate,
-                                time = task.dueTime,
-                                repeating = task.recurrence != null,
-                                today = today,
-                                onClick = onDateClick,
-                            )
-                        }
-                        if (!task.linkUrl.isNullOrBlank()) {
-                            Surface(
-                                shape = MaterialTheme.shapes.small,
-                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                                modifier = Modifier.clickable {
-                                    runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(task.linkUrl))) }
-                                },
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Icon(Icons.Outlined.Link, contentDescription = null, modifier = Modifier.size(14.dp))
-                                    Spacer(Modifier.width(4.dp))
-                                    Text(
-                                        text = task.linkTitle?.ifBlank { null } ?: "Link",
-                                        style = MaterialTheme.typography.labelMedium,
-                                        maxLines = 1,
-                                    )
-                                }
-                            }
-                        }
-                        if (listBadge != null) {
-                            ListBadge(listId = task.listId, title = listBadge)
-                        }
-                    }
-                }
-            }
-            if (!task.completed) {
-                IconButton(
-                    onClick = onToggleStar,
-                    modifier = Modifier.size(40.dp).testTag("star:${task.id}"),
-                ) {
-                    if (task.starred) {
-                        Icon(
-                            Icons.Filled.Star,
-                            contentDescription = "Remove from Starred",
-                            tint = MaterialTheme.colorScheme.primary,
-                        )
-                    } else {
-                        Icon(
-                            Icons.Outlined.StarBorder,
-                            contentDescription = "Add to Starred",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-                trailingDragHandle?.invoke()
-            }
+            trailingDragHandle?.invoke()
         }
     }
 }
@@ -247,7 +220,7 @@ fun ListBadge(listId: String, title: String, modifier: Modifier = Modifier) {
     Surface(
         color = accent.copy(alpha = 0.14f),
         shape = MaterialTheme.shapes.small,
-        modifier = modifier,
+        modifier = modifier.testTag("badge:$listId"),
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),

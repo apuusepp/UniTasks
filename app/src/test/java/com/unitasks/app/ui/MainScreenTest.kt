@@ -9,14 +9,20 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipeLeft
+import androidx.compose.ui.test.swipeRight
 import androidx.test.core.app.ApplicationProvider
 import com.unitasks.app.data.AuthMode
 import com.unitasks.app.data.Settings
 import com.unitasks.app.data.TasksRepository
 import com.unitasks.app.data.local.AppDatabase
+import com.unitasks.app.domain.SortMode
+import com.unitasks.app.domain.UnifiedGrouping
 import com.unitasks.app.ui.theme.UniTasksTheme
 import kotlinx.coroutines.runBlocking
 import org.junit.After
+import org.junit.Assert.assertEquals
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -51,7 +57,7 @@ class MainScreenTest {
     }
 
     @Test
-    fun unified_view_shows_all_lists_switches_to_date_grouping_and_filters_lists() {
+    fun unified_view_shows_all_lists_switches_to_date_and_none_grouping_sorts_and_swipes_lists() {
         var personalId = ""
         var workId = ""
         var taskAId = ""
@@ -97,25 +103,47 @@ class MainScreenTest {
 
         // Switch unified grouping to "By date": Overdue header appears and rows show list badges
         composeRule.onNodeWithTag("grouping_by_date").performClick()
-        org.junit.Assert.assertEquals(
-            "grouping=${vm.state.value.unifiedGrouping}, sections=${vm.state.value.sections.map { it.title }}",
-            com.unitasks.app.domain.UnifiedGrouping.BY_DATE,
-            vm.state.value.unifiedGrouping,
-        )
+        assertEquals(UnifiedGrouping.BY_DATE, vm.state.value.unifiedGrouping)
         composeRule.onNodeWithText("Overdue").assertIsDisplayed()
         composeRule.onNodeWithText("Buy coffee").assertIsDisplayed()
         composeRule.onNodeWithText("Send invoice").assertIsDisplayed()
 
-        // Filter out the "Work" list via its filter chip
+        // Switch unified grouping to "None": no section headers, each task shows its list badge
+        composeRule.onNodeWithTag("grouping_none").performClick()
+        assertEquals(UnifiedGrouping.NONE, vm.state.value.unifiedGrouping)
+        composeRule.onNodeWithText("Overdue").assertDoesNotExist()
+        composeRule.onNodeWithTag("badge:$personalId", useUnmergedTree = true).assertIsDisplayed()
+        composeRule.onNodeWithTag("badge:$workId", useUnmergedTree = true).assertIsDisplayed()
+
+        // Sort All tasks by Title using the sort control
+        composeRule.onNodeWithTag("btn_all_tasks_sort").performClick()
+        composeRule.onNodeWithTag("sort_option:TITLE").performClick()
+        assertEquals(SortMode.TITLE, vm.state.value.allTasksSort)
+
+        // Filter out the "Work" list via its filter chip, then restore it
         composeRule.onNodeWithTag("filter_list:$workId").performClick()
         composeRule.onNodeWithText("Buy coffee").assertIsDisplayed()
         composeRule.onNodeWithText("Send invoice").assertDoesNotExist()
+        composeRule.onNodeWithTag("filter_list:$workId").performClick()
 
-        // Switch to the Starred tab
+        // Swipe left on the pager from "All tasks" -> "My Tasks" list tab, then swipe left -> "Work" list tab
+        composeRule.onNodeWithTag("tasks_pager").performTouchInput { swipeLeft() }
+        composeRule.waitForIdle()
+        assertEquals(SelectedTab.ListTab(personalId), vm.state.value.selectedTab)
+
+        composeRule.onNodeWithTag("tasks_pager").performTouchInput { swipeLeft() }
+        composeRule.waitForIdle()
+        assertEquals(SelectedTab.ListTab(workId), vm.state.value.selectedTab)
+
+        // Swipe right back to "My Tasks"
+        composeRule.onNodeWithTag("tasks_pager").performTouchInput { swipeRight() }
+        composeRule.waitForIdle()
+        assertEquals(SelectedTab.ListTab(personalId), vm.state.value.selectedTab)
+
+        // Switch to the Starred tab and complete the task
         composeRule.onNodeWithTag("tab_starred").performClick()
         composeRule.onNodeWithText("Buy coffee").assertIsDisplayed()
 
-        // Complete the task from the UI and verify the "Completed (1)" section appears
         composeRule.onNodeWithTag("complete:$taskAId").performClick()
         composeRule.waitUntil(timeoutMillis = 5_000) {
             composeRule.onAllNodesWithText("Completed (1)").fetchSemanticsNodes().isNotEmpty()
@@ -123,3 +151,4 @@ class MainScreenTest {
         composeRule.onNodeWithText("Completed (1)").assertIsDisplayed()
     }
 }
+

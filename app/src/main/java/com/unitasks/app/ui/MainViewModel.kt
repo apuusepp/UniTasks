@@ -42,8 +42,10 @@ sealed interface UndoAction {
 
 data class MainUiState(
     val lists: List<TaskList> = emptyList(),
+    val tasks: List<Task> = emptyList(),
     val selectedTab: SelectedTab = SelectedTab.AllTasks,
     val unifiedGrouping: UnifiedGrouping = UnifiedGrouping.BY_LIST,
+    val allTasksSort: SortMode = SortMode.MY_ORDER,
     val hiddenListIds: Set<String> = emptySet(),
     val starredSort: SortMode = SortMode.STARRED_RECENTLY,
     val sections: List<TaskSection> = emptyList(),
@@ -65,6 +67,70 @@ data class MainUiState(
         get() = currentList?.id
             ?: lists.firstOrNull { it.id !in hiddenListIds }?.id
             ?: lists.firstOrNull()?.id
+
+    /** Computes sections and completed tasks for any tab (used by HorizontalPager pages). */
+    fun contentForTab(tab: SelectedTab, today: LocalDate): Pair<List<TaskSection>, List<Task>> {
+        if (tab == selectedTab && (sections.isNotEmpty() || completed.isNotEmpty())) {
+            return sections to completed
+        }
+        return computeTabContent(
+            tab = tab,
+            lists = lists,
+            tasks = tasks,
+            grouping = unifiedGrouping,
+            allTasksSort = allTasksSort,
+            hiddenListIds = hiddenListIds,
+            starredSort = starredSort,
+            searchQuery = searchQuery,
+            today = today,
+        )
+    }
+}
+
+internal fun computeTabContent(
+    tab: SelectedTab,
+    lists: List<TaskList>,
+    tasks: List<Task>,
+    grouping: UnifiedGrouping,
+    allTasksSort: SortMode,
+    hiddenListIds: Set<String>,
+    starredSort: SortMode,
+    searchQuery: String,
+    today: LocalDate,
+): Pair<List<TaskSection>, List<Task>> = when (tab) {
+    SelectedTab.AllTasks -> {
+        val agg = UnifiedViewBuilder.buildAllTasks(
+            lists = lists,
+            tasks = tasks,
+            grouping = grouping,
+            sort = allTasksSort,
+            hiddenListIds = hiddenListIds,
+            query = searchQuery,
+            today = today,
+        )
+        agg.sections to agg.completed
+    }
+    SelectedTab.Starred -> {
+        val agg = UnifiedViewBuilder.buildStarred(
+            lists = lists,
+            tasks = tasks,
+            sort = starredSort,
+            query = searchQuery,
+            today = today,
+        )
+        agg.sections to agg.completed
+    }
+    is SelectedTab.ListTab -> {
+        val list = lists.firstOrNull { it.id == tab.listId } ?: return emptyList<TaskSection>() to emptyList()
+        val forList = tasks.filter { it.listId == list.id }
+        val rawSections = TaskOrganizer.sectionsForList(forList, list.sortMode, today)
+        val filtered = rawSections.mapNotNull { s ->
+            val nodes = TaskOrganizer.filterNodes(s.nodes, searchQuery)
+            if (nodes.isEmpty() && s.title != null) null else s.copy(nodes = nodes)
+        }
+        val done = TaskOrganizer.completed(forList.filter { TaskOrganizer.matches(it, searchQuery) })
+        filtered to done
+    }
 }
 
 class MainViewModel(
@@ -127,6 +193,7 @@ class MainViewModel(
         val listIds = lists.mapTo(HashSet()) { it.id }
         val tasks = latestTasks.filter { it.listId in listIds }
         val grouping = settings.unifiedGrouping.value
+        val allTasksSort = settings.allTasksSort.value
         val hidden = settings.hiddenListIds.value
         val starredSort = settings.starredSort.value
         val today = todayProvider()
@@ -136,44 +203,23 @@ class MainViewModel(
             else -> t
         }
         val titles = lists.associate { it.id to it.title }
-        val (sections, completed) = when (effectiveTab) {
-            SelectedTab.AllTasks -> {
-                val agg = UnifiedViewBuilder.buildAllTasks(
-                    lists = lists,
-                    tasks = tasks,
-                    grouping = grouping,
-                    hiddenListIds = hidden,
-                    query = searchQuery,
-                    today = today,
-                )
-                agg.sections to agg.completed
-            }
-            SelectedTab.Starred -> {
-                val agg = UnifiedViewBuilder.buildStarred(
-                    lists = lists,
-                    tasks = tasks,
-                    sort = starredSort,
-                    query = searchQuery,
-                    today = today,
-                )
-                agg.sections to agg.completed
-            }
-            is SelectedTab.ListTab -> {
-                val list = lists.first { it.id == effectiveTab.listId }
-                val forList = tasks.filter { it.listId == list.id }
-                val rawSections = TaskOrganizer.sectionsForList(forList, list.sortMode, today)
-                val filtered = rawSections.mapNotNull { s ->
-                    val nodes = TaskOrganizer.filterNodes(s.nodes, searchQuery)
-                    if (nodes.isEmpty() && s.title != null) null else s.copy(nodes = nodes)
-                }
-                val done = TaskOrganizer.completed(forList.filter { TaskOrganizer.matches(it, searchQuery) })
-                filtered to done
-            }
-        }
+        val (sections, completed) = computeTabContent(
+            tab = effectiveTab,
+            lists = lists,
+            tasks = tasks,
+            grouping = grouping,
+            allTasksSort = allTasksSort,
+            hiddenListIds = hidden,
+            starredSort = starredSort,
+            searchQuery = searchQuery,
+            today = today,
+        )
         return MainUiState(
             lists = lists,
+            tasks = tasks,
             selectedTab = effectiveTab,
             unifiedGrouping = grouping,
+            allTasksSort = allTasksSort,
             hiddenListIds = hidden,
             starredSort = starredSort,
             sections = sections,
@@ -240,6 +286,10 @@ class MainViewModel(
 
     fun setCurrentSort(sortMode: SortMode) {
         when (val tab = state.value.selectedTab) {
+            SelectedTab.AllTasks -> {
+                settings.setAllTasksSort(sortMode)
+                recompute()
+            }
             SelectedTab.Starred -> {
                 settings.setStarredSort(sortMode)
                 recompute()
@@ -248,7 +298,6 @@ class MainViewModel(
                 repository.setListSort(tab.listId, sortMode)
                 refresh()
             }
-            SelectedTab.AllTasks -> Unit
         }
     }
 
